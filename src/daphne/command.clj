@@ -1,21 +1,24 @@
 (ns daphne.command
   (:refer-clojure :exclude [compile])
-  (:require [clojure.string :as str]
+  (:require [clojure.data.json :as json]
             [clojure.edn :as edn]
-            [clojure.walk :as walk]
-            [clojure.tools.cli :refer [parse-opts]]
             [clojure.java.io :as io]
-            [clojure.data.json :as json]
+            [clojure.string :as str]
+            [clojure.tools.cli :refer [parse-opts]]
+            [clojure.walk :as walk]
             [daphne.address-transformation :refer [address-trafo]]
-            [daphne.gensym :refer [*my-gensym*]]
-            [daphne.hy :refer [foppl->python]]
+            [daphne.core :refer [program->graph]]
             [daphne.desugar :refer [desugar]]
             [daphne.desugar-datastructures :refer [desugar-datastructures]]
             [daphne.desugar-hoppl :refer [desugar-hoppl-global]]
-            [daphne.hoppl-cps :refer [hoppl-cps]]
-            [daphne.metropolis-within-gibbs :refer [metropolis-within-gibbs]]
+            [daphne.factor-graph :refer [clean-factor-graph
+                                         graph->factor-graph
+                                         source-code-transformation]]
+            [daphne.gensym :refer [*my-gensym*]]
             [daphne.hmc :refer [hmc]]
-            [daphne.core :refer [program->graph]])
+            [daphne.hoppl-cps :refer [hoppl-cps]]
+            [daphne.hy :refer [foppl->python]]
+            [daphne.metropolis-within-gibbs :refer [metropolis-within-gibbs]])
   (:import [java.io PushbackReader StringReader])
   (:gen-class))
 
@@ -31,6 +34,8 @@
         ""
         "Actions:"
         "  graph                   Create graphical model of the program"
+        "  factor-graph            Create graphical model of the program with factors"
+        "  factor-transform        Apply preprocessing to source code for factor graph"
         "  desugar                 Return a desugared FOPPL syntax object of the program"
         "  desugar-hoppl           Return a desugared HOPPL syntax object of the program"
         "  desugar-hoppl-noaddress Return a desugared HOPPL syntax object of the program without addresses"
@@ -45,7 +50,7 @@
   (str "The following errors occurred while parsing your command:\n\n"
        (str/join \newline errors)))
 
-(def actions #{"graph" "desugar" "desugar-hoppl" "desugar-hoppl-noaddress" "desugar-hoppl-cps"
+(def actions #{"graph" "factor-graph" "factor-transform" "desugar" "desugar-hoppl" "desugar-hoppl-noaddress" "desugar-hoppl-cps"
               "python-class" "infer"})
 
 (def cli-options
@@ -150,12 +155,17 @@
     (println "Executing" action " for:")
     (apply println code))
   (let [gensyms (atom (range))]
+    ;; *my-gensym* is a global variable that is used to generate unique symbols
+    ;; it applies to the entire call stack of functions invoked during execution
+    ;; of the binding form (i.e program->graph)
     (binding [*my-gensym* (fn [s]
                             (let [f (first @gensyms)]
                               (swap! gensyms rest)
                               (symbol (str s f))))]
       (case action
-        :graph (-> code program->graph desugar-datastructures-graph)
+        :graph (-> code program->graph desugar-datastructures-graph) 
+        :factor-graph (-> code source-code-transformation program->graph desugar-datastructures-graph graph->factor-graph clean-factor-graph)
+        :factor-transform (-> code source-code-transformation program->graph)
         :desugar (-> code desugar desugar-datastructures)
         :desugar-hoppl (list
                         'fn ['alpha]
@@ -180,8 +190,12 @@
       (exit (if ok? 0 1) exit-message)
       (let [source (or (:source options)
                        (slurp (or (:input-file options) *in*)))
+            ;; Source is obtained and returned as a string
+            ;; Expressions are extracted as a list of strings
             code (read-all-exps source)
+            _ (println "Code: " code)
             out' (execute action code options)
+            _ (println "Result of execute: " out')
             out' (walk/postwalk add-string-encoding out')
             out (if (not (string? out'))
                   (case (:format options)
@@ -189,9 +203,17 @@
                     :pretty-json (with-out-str (json/pprint out'))
                     :edn  (pr-str out'))
                   out')]
+        (println "Action: " action)
         (when (pos? (:verbosity options))
           (println))
         (if (:output-file options)
           (spit (:output-file options) out)
           (println out))
-        (System/exit 0)))))
+        ))))
+
+(comment
+  (-main "factor-transform" "-i" "programs/test_programs/skills.daphne" "-o" "out.json")
+  (-main "factor-graph" "-i" "programs/test_programs/skills.daphne" "-o" "out.json")
+  (-main "graph" "-i" "programs/homework2/1.daphne" "-o" "out.json")
+  )
+
