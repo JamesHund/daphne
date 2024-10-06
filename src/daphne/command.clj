@@ -11,8 +11,8 @@
             [daphne.desugar :refer [desugar]]
             [daphne.desugar-datastructures :refer [desugar-datastructures]]
             [daphne.desugar-hoppl :refer [desugar-hoppl-global]]
-            [daphne.factor-graph :refer [clean-factor-graph
-                                         graph->factor-graph
+            [daphne.factor-graph :refer [graph->factor-graph
+                                         reformat-factor-graph remove-cruft
                                          source-code-transformation]]
             [daphne.gensym :refer [*my-gensym*]]
             [daphne.hmc :refer [hmc]]
@@ -164,8 +164,8 @@
                               (symbol (str s f))))]
       (case action
         :graph (-> code program->graph desugar-datastructures-graph) 
-        :factor-graph (-> code source-code-transformation program->graph desugar-datastructures-graph graph->factor-graph clean-factor-graph)
-        :factor-transform (-> code source-code-transformation program->graph)
+        :factor-graph (-> code source-code-transformation program->graph desugar-datastructures-graph graph->factor-graph reformat-factor-graph remove-cruft)
+        :factor-transform (-> code source-code-transformation program->graph desugar-datastructures-graph graph->factor-graph)
         :desugar (-> code desugar desugar-datastructures)
         :desugar-hoppl (list
                         'fn ['alpha]
