@@ -193,9 +193,7 @@
             ;; Source is obtained and returned as a string
             ;; Expressions are extracted as a list of strings
             code (read-all-exps source)
-            _ (println "Code: " code)
             out' (execute action code options)
-            _ (println "Result of execute: " out')
             out' (walk/postwalk add-string-encoding out')
             out (if (not (string? out'))
                   (case (:format options)
@@ -203,13 +201,12 @@
                     :pretty-json (with-out-str (json/pprint out'))
                     :edn  (pr-str out'))
                   out')]
-        (println "Action: " action)
         (when (pos? (:verbosity options))
           (println))
         (if (:output-file options)
           (spit (:output-file options) out)
           (println out))
-        ))))
+        (System/exit 0)))))
 
 (comment
   (-main "factor-transform" "-i" "programs/test_programs/skills.daphne" "-o" "out.json")

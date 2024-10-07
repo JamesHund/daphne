@@ -84,7 +84,6 @@
 ;; Let stays the same except for the assigned expression and the body
 (defmethod transform :let
   [exp]
-  (println exp)
   (let [[_ [v e] body] (desugar-let exp)
         transformed-e (transform e)
         transformed-body (transform body)]
@@ -131,10 +130,7 @@
 ;; TODO: keep track of defined functions and treat defn as a special case
 (defmethod transform :application
   [exp]
-  (println "Application: " exp)
   (let [[f & args] exp
-        _ (println "Function: " f)
-        _ (println "Args: " args)
         transformed-f (transform f)
         transformed-args (map (fn [a] (transform a)) args)]
     (list 'sample (list 'dirac (apply list transformed-f transformed-args)))))
