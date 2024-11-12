@@ -23,3 +23,7 @@
        (rand-tensor dims)
        (rand)))))
 
+(defn absleq [x value]
+  "Returns true if the absolute value of x is less than or equal to value."
+  (<= (Math/abs x) value))
+
