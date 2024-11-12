@@ -14,7 +14,7 @@
             [daphne.factor-graph :refer [graph->factor-graph
                                          reformat-factor-graph remove-cruft
                                          source-code-transformation]]
-            [daphne.gensym :refer [*my-gensym*]]
+            [daphne.gensym :refer [*gensyms*]]
             [daphne.hmc :refer [hmc]]
             [daphne.hoppl-cps :refer [hoppl-cps]]
             [daphne.hy :refer [foppl->python]]
@@ -154,29 +154,22 @@
   (when (pos? (:verbosity opts))
     (println "Executing" action " for:")
     (apply println code))
-  (let [gensyms (atom (range))]
-    ;; *my-gensym* is a global variable that is used to generate unique symbols
-    ;; it applies to the entire call stack of functions invoked during execution
-    ;; of the binding form (i.e program->graph)
-    (binding [*my-gensym* (fn [s]
-                            (let [f (first @gensyms)]
-                              (swap! gensyms rest)
-                              (symbol (str s f))))]
-      (case action
-        :graph (-> code program->graph desugar-datastructures-graph) 
-        :factor-graph (-> code source-code-transformation program->graph desugar-datastructures-graph graph->factor-graph reformat-factor-graph remove-cruft)
-        :factor-transform (-> code source-code-transformation program->graph desugar-datastructures-graph graph->factor-graph)
-        :desugar (-> code desugar desugar-datastructures)
-        :desugar-hoppl (list
-                        'fn ['alpha]
-                        (-> code desugar-hoppl-global (address-trafo 'alpha)))
-        :desugar-hoppl-cps (list
-                            'fn ['alpha 'k-return]
-                            (-> code desugar-hoppl-global (address-trafo 'alpha) (hoppl-cps 'k-return)))
+    (reset! *gensyms* {})
+    (case action
+    :graph (-> code program->graph desugar-datastructures-graph)
+    :factor-graph (-> code source-code-transformation program->graph desugar-datastructures-graph graph->factor-graph reformat-factor-graph remove-cruft)
+    :factor-transform (-> code source-code-transformation program->graph desugar-datastructures-graph graph->factor-graph)
+    :desugar (-> code desugar desugar-datastructures)
+    :desugar-hoppl (list
+                    'fn ['alpha]
+                    (-> code desugar-hoppl-global (address-trafo 'alpha)))
+    :desugar-hoppl-cps (list
+                        'fn ['alpha 'k-return]
+                        (-> code desugar-hoppl-global (address-trafo 'alpha) (hoppl-cps 'k-return)))
 
-        :desugar-hoppl-noaddress (-> code desugar-hoppl-global)
-        :python-class (foppl->python code)
-        :infer (infer code opts)))))
+    :desugar-hoppl-noaddress (-> code desugar-hoppl-global)
+    :python-class (foppl->python code)
+    :infer (infer code opts)))
 
 (defn add-string-encoding [x]
   (cond ;(symbol? x)  (str "'" (name x))

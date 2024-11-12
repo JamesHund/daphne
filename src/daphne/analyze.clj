@@ -4,7 +4,7 @@
             [daphne.free-vars :refer [free-vars]]
             [daphne.desugar-let :refer [desugar-let]]
             [daphne.primitives]
-            [daphne.gensym :refer [*my-gensym*]]
+            [daphne.gensym :refer [*my-gensym*, *current-variable-name*]]
             [daphne.partial-evaluation :refer [fixed-point-simplify]]))
 
 
@@ -29,6 +29,8 @@
 
 (def ^:dynamic *bound*
   (into *primitive-procedures* ['if 'let 'dirac]))
+
+(def ^:dynamic *current-variable* nil)
 
 (def empty-env {})
 
@@ -149,7 +151,8 @@
 (defmethod analyze :let
   [rho phi exp]
   (let [[_ [v e1] & body] (desugar-let exp)
-        [rho1 G1 E1] (analyze rho phi e1)
+        [rho1 G1 E1] (binding [*current-variable-name* (name v)]
+                       (analyze rho phi e1))
         res (map #(analyze rho phi (fixed-point-simplify (substitute % v E1))) body)
         rhos (map first res)
         Gs (map second res)
