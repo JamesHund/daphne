@@ -18,6 +18,7 @@
 
   :jvm-opts ["-Xss64m" "-Xmx4g"]
 
+  :aot [daphne.command]
   :main daphne.command
 
   :min-lein-version "2.0.0")
