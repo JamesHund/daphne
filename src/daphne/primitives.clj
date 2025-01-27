@@ -27,3 +27,9 @@
   "Returns true if the absolute value of x is less than or equal to value."
   (<= (Math/abs x) value))
 
+(defn add-args [& args]
+  "Aggregates multiple performance values by summing them.
+  Usage: (add-args perf1 perf2 ... perfN)"
+  (reduce + args))
+
+(defn kumaraswamy [& args])

@@ -18,7 +18,8 @@
             [daphne.hmc :refer [hmc]]
             [daphne.hoppl-cps :refer [hoppl-cps]]
             [daphne.hy :refer [foppl->python]]
-            [daphne.metropolis-within-gibbs :refer [metropolis-within-gibbs]])
+            [daphne.metropolis-within-gibbs :refer [metropolis-within-gibbs]]
+            [clojure.stacktrace :as stacktrace])
   (:import [java.io PushbackReader StringReader])
   (:gen-class))
 
@@ -43,6 +44,9 @@
         "  python-class  Create a Python class with sample and log probability methods for the program"
         "  infer         Run inference on the program"
         ""
+        "Notes:"
+        "  - If no input file or source code is provided, the program reads from STDIN."
+        "  - If no output file is specified, the output is written to STDOUT."
         "Please refer to the manual page for more information."]
        (str/join \newline)))
 
@@ -62,8 +66,9 @@
       :parse-fn keyword
       :validate [formats (str "Must be one of: " (str/join ", " formats))]]
      ["-s" "--source SOURCECODE" "Program source code, by default STDIN is used."
-      :default nil
-      :validate [read-string "Cannot read program code."]]
+      :default nil]
+      ;;:validate [read-string "Cannot read program code."]]
+     ["-d" "--daemon" "Run the compiler as a daemon (server mode)"]
      ["-i" "--input-file SOURCEFILE" "Program source file, by default STDIN is used."
       :default nil
       :validate [#(.exists (io/file %))
@@ -96,17 +101,25 @@
   [args]
   (let [{:keys [options arguments errors summary]} (parse-opts args cli-options)]
     (cond
-      (:help options) ; help => exit OK with usage summary
+      (:help options)
       {:exit-message (usage summary) :ok? true}
 
-      errors          ; errors => exit with description of errors
+      errors
       {:exit-message (error-msg errors)}
 
-      ;; custom validation on arguments
-      (and (:source options) (:source-file options))
-      {:exit-message "The --source and --source-file options are exclusive."}
+      (:daemon options)
+      {:daemon true :options options}
 
-      (and (= 1 (count arguments))
+      (and (:source options) (:input-file options))
+      {:exit-message "The --source and --input-file options are exclusive."}
+
+      ;; Allow piping input when no source is specified
+      (and (empty? (:source options))
+           (empty? (:input-file options))
+           (empty? arguments))
+      {:exit-message "No action specified. Please provide an action."}
+
+      (and (<= 1 (count arguments))
            (actions (first arguments)))
       {:action (keyword (first arguments)) :options options}
 
@@ -114,8 +127,9 @@
       {:exit-message (str "Unknown command, must be one of: "
                           (str/join ", " actions))}
 
-      :else           ; failed custom validation => exit with usage summary
+      :else
       {:exit-message (usage summary)})))
+
 
 (defn exit [status msg]
   (println msg)
@@ -177,20 +191,74 @@
         (string? x)  (str "\"" x "\"")
         :else        x))
 
+(defn run-daemon [options]
+  (let [port 6677]
+    (println (str "Daphne compiler daemon started on port " port))
+    (with-open [server-socket (java.net.ServerSocket. port)]
+      (loop []
+        (let [client-socket (.accept server-socket)]
+          (future
+            (with-open [reader (io/reader client-socket)
+                        writer (io/writer client-socket)]
+              (loop []
+                (let [line (try
+                             (.readLine reader)
+                             (catch java.io.EOFException e
+                               ;; Client disconnected
+                               nil))]
+                  (if (nil? line)
+                    ;; Client has closed the connection
+                    (println "Client disconnected")
+                    ;; Process the request
+                    (do
+                      (try
+                        (let [request-json (json/read-str line :key-fn keyword)
+                              {:keys [action code options]} request-json
+                              default-options {:verbosity 0}
+                              options (-> (merge default-options options)
+                                          (update :format keyword))
+                              ;; Process the code
+                              code-exprs (read-all-exps code)
+                              result (execute (keyword action) code-exprs options)
+                              response {:status "success" :result result}]
+                          ;; Send response back to client
+                          (json/write response writer)
+                          (.write writer "\n") ; Add newline delimiter
+                          (.flush writer))
+                        (catch Exception e
+                          ;; Handle exceptions during processing
+                          (println "Exception occurred while processing request:")
+                          (println (.getMessage e))
+                          (stacktrace/print-stack-trace e)
+                          ;; Send error response to client
+                          (let [response {:status "error" :message (.getMessage e)}]
+                            (json/write response writer)
+                            (.write writer "\n") ; Add newline delimiter
+                            (.flush writer))))
+                      ;; Continue to process the next request
+                      (recur)))))))
+          ;; Continue to accept new connections
+          (recur))))))
+
+
 (defn -main [& args]
-  (let [{:keys [action options exit-message ok?]} (validate-args args)]
-    (if exit-message
+  (let [{:keys [action options daemon exit-message ok?]} (validate-args args)]
+    (cond
+      exit-message
       (exit (if ok? 0 1) exit-message)
+
+      daemon
+      (run-daemon options)
+
+      :else
       (let [source (or (:source options)
                        (slurp (or (:input-file options) *in*)))
-            ;; Source is obtained and returned as a string
-            ;; Expressions are extracted as a list of strings
             code (read-all-exps source)
             out' (execute action code options)
             out' (walk/postwalk add-string-encoding out')
             out (if (not (string? out'))
                   (case (:format options)
-                    :json (json/json-str out')
+                    :json (json/write-str out')
                     :pretty-json (with-out-str (json/pprint out'))
                     :edn  (pr-str out'))
                   out')]
