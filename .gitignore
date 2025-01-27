@@ -14,3 +14,8 @@ pom.xml.asc
 .pyc
 __pycache__
 .mypy_cache
+.calva
+.clj-kondo
+.clj-kondo/.cache
+.cpcache
+.lsp
