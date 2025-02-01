@@ -1,12 +1,15 @@
-(ns daphne.factor-graph 
+(ns daphne.factor-graph
+  "This namespace contains an implementation of FOPPL factor graph compilation following chapter
+  3.5 of 'An Introduction to Probabilistic Programming' by van de Meent et al."
   (:require [clojure.set :as set]
             [daphne.desugar-let :refer [desugar-let]]))
 
+;; TODO: Align supported distributions with analyze.clj OR align with Expectation Propagation implementation supported potentials
+;; This is a seemingly arbitrary choice of distributions (because it is)
 (def distributions
   #{'dirac 'normal 'beta 'gamma 'dirichlet 'uniform 'uniform-continuous 'categorical 'discrete 'exponential 'poisson 'bernoulli 'binomial 'multinomial})
+
 (defn dispatch-transform
-  "rho is environment, phi whether we are on the control flow path, exp current
-  expression"
   [exp]
   (cond (or (number? exp)
             (nil? exp)
@@ -58,6 +61,8 @@
         (throw (ex-info "Not supported." {:exp exp 
                                           }))))
 
+;;A multimethod for performing source code transformation specified in Figure 3.2 of Ch. 3.5.
+;;The method will wrap if, and other deterministic primitive procedures with (sample (dirac ...))
 (defmulti transform dispatch-transform)
 
 (defmethod transform :constant
@@ -76,12 +81,10 @@
   [exp]
   (map transform exp))
 
-;; Not 100% sure about this one
 (defmethod transform :map
   [exp]
   (into {} (map (fn [[k v]] [k (transform v)]) exp)))
 
-;; Let stays the same except for the assigned expression and the body
 (defmethod transform :let
   [exp]
   (let [[_ [v e] body] (desugar-let exp)
@@ -89,14 +92,12 @@
         transformed-body (transform body)]
     (list 'let [v transformed-e] transformed-body)))
 
-;; Sample and observe are the same except for the expression
 (defmethod transform :sample
   [exp]
   (let [[_ e] exp
         transformed-e (transform e)]
     (list 'sample transformed-e)))
 
-;; Observe is the same as sample
 (defmethod transform :observe
   [exp]
   (let [[_ e1 e2] exp
@@ -104,8 +105,6 @@
         transformed-e2 (transform e2)]
     (list 'observe transformed-e1 transformed-e2)))
 
-;; If we transform the condition and the two branches
-;; and wrap it inside a (sample (dirac (if ...)))
 (defmethod transform :if
   [exp]
   (let [[_ cond e1 e2] exp
@@ -114,20 +113,21 @@
         transformed-e2 (transform e2)]
     (list 'sample (list 'dirac (list 'if transformed-cond transformed-e1 transformed-e2)))))
 
-;; 
 (defmethod transform :defn
   [exp]
   (let [[_ name args body] exp
         transformed-body (transform body)]
     (list 'defn name args transformed-body)))
 
+;; NOTE: The reason for distinction between dist and application is we don't want to wrap distribution primitives
+;; i.e. We don't want (sample (normal 0.0 1.0)) to be transformed to (sample (sample (dirac (normal 0.0 1.0))))
+;; This is a deviates from the transformation specified in Figure 3.2.
 (defmethod transform :dist
   [exp]
   (let [[dist & args] exp
         transformed-args (map transform args)]
     (apply list dist transformed-args)))
 
-;; TODO: keep track of defined functions and treat defn as a special case
 (defmethod transform :application
   [exp]
   (let [[f & args] exp
@@ -142,10 +142,9 @@
   "Transforms a given source code sequence into its transformed version
    according to the rules defined in the `transform` multimethod."
   [code]
-  ;; Apply transform to each expression in the code
   (map transform code))
 
-;; Takes in a directed graph data structure and converts to a factor graph
+;; Maps a directed graph data structure to a factor graph data structure
 (defn graph->factor-graph [directed-graph]
   (let [{:keys [V A P Y]} (second directed-graph)  ;; Extract the graph structure
         observed-vars (keys Y)                     ;; Get the observed variables
